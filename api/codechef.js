@@ -12,101 +12,130 @@ module.exports = async (req, res) => {
   }
 
   const { handle } = req.query;
-
   if (!handle) {
     return res.status(400).json({ error: 'Missing handle parameter' });
   }
 
+  const axiosConfig = {
+    timeout: 12000,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      Accept: 'application/json, text/plain, */*',
+      Referer: `https://www.codechef.com/users/${handle}`,
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+  };
+
   try {
-    const url = `https://www.codechef.com/users/${handle}`;
-    const response = await axios.get(url, {
-      timeout: 10000,
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-      },
-    });
+    // -------------------------------------------------------------------
+    // CodeChef's profile page is Cloudflare-protected.
+    // Instead, we use the internal /recent/user API which returns paginated
+    // submission history as an HTML table — no bot protection.
+    // Verdict is stored in the `title` attribute of a <span> in column 3.
+    // -------------------------------------------------------------------
+    const MAX_PAGES = 10;
+    const solvedSet = new Set();    // problem codes that got AC
+    const attemptedMap = new Map(); // code -> { name, url } for non-AC
 
-    const $ = cheerio.load(response.data);
-    const solvedSet = new Set();
-    const attempted = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const url = `https://www.codechef.com/recent/user?user_handle=${encodeURIComponent(handle)}&page=${page}`;
+      let data;
 
-    // --- Parse Fully Solved problems ---
-    // CodeChef places them inside a section with heading "Fully Solved"
-    $('article.problems-solved h5')
-      .filter((_, el) => $(el).text().trim().toLowerCase().includes('fully solved'))
-      .each((_, heading) => {
-        // Sibling <div> contains the list
-        $(heading)
-          .next('div')
-          .find('a')
-          .each((_, a) => {
-            const pid = $(a).text().trim().toUpperCase();
-            if (pid) solvedSet.add(pid);
-          });
-      });
+      try {
+        const resp = await axios.get(url, axiosConfig);
+        data = resp.data;
+      } catch (err) {
+        break;
+      }
 
-    // Also handle newer CodeChef layout: problems listed in .problem-solved sections
-    $('.problem-solved .prob-name a, .problems-solved-section a').each((_, a) => {
-      const pid = $(a).text().trim().toUpperCase();
-      if (pid) solvedSet.add(pid);
-    });
+      const html = typeof data === 'string' ? data : (data.content || '');
 
-    // --- Parse Attempted / Partially Solved problems ---
-    $('article.problems-solved h5')
-      .filter((_, el) => {
-        const text = $(el).text().trim().toLowerCase();
-        return text.includes('attempted') || text.includes('partially');
-      })
-      .each((_, heading) => {
-        $(heading)
-          .next('div')
-          .find('a')
-          .each((_, a) => {
-            const pid = $(a).text().trim().toUpperCase();
-            if (pid && !solvedSet.has(pid)) {
-              attempted.push(pid);
-            }
-          });
-      });
+      // No activity at all on page 0 → treat as invalid/empty handle
+      if (page === 0 && html.includes('No Recent Activity')) {
+        return res.status(404).json({
+          error: `CodeChef user "${handle}" not found or has no submissions.`,
+        });
+      }
 
-    // Fallback: scan all problem links that aren't in solved set
-    $('a[href^="/problems/"]').each((_, a) => {
-      const href = $(a).attr('href') || '';
-      const match = href.match(/^\/problems\/([A-Z0-9]+)$/i);
-      if (match) {
-        const pid = match[1].toUpperCase();
-        if (!solvedSet.has(pid) && !attempted.includes(pid)) {
-          // Only add if they appear in practice/contest sections
-          const parent = $(a).closest('.problems-solved, .problems-attempted');
-          if (parent.length > 0) {
-            attempted.push(pid);
+      if (!html || html.trim() === '') break;
+
+      const $ = cheerio.load(html);
+      let rowsOnPage = 0;
+
+      $('table tbody tr').each((_, row) => {
+        const cells = $(row).find('td');
+        if (cells.length < 3) return;
+        rowsOnPage++;
+
+        // ── Problem (column index 1) ──
+        const problemCell = $(cells[1]);
+        const link = problemCell.find('a').first();
+        const href = link.attr('href') || '';
+        const problemName = link.text().trim();
+
+        // Extract problem code from URL patterns:
+        //   /CONTESTCODE/problems/PROBCODE
+        //   /problems/PROBCODE
+        const codeMatch =
+          href.match(/\/problems\/([A-Z0-9_]+)/i) ||
+          href.match(/problems\/([A-Z0-9_]+)/i);
+        if (!codeMatch) return;
+
+        const problemCode = codeMatch[1].toUpperCase();
+        const problemUrl = href.startsWith('http')
+          ? href
+          : `https://www.codechef.com${href}`;
+
+        // ── Verdict (column index 2) ──
+        // CodeChef shows verdict as an <img> inside a <span title="...">
+        const verdictCell = $(cells[2]);
+        const verdictTitle = (
+          verdictCell.find('span[title]').attr('title') ||
+          verdictCell.find('img[alt]').attr('alt') ||
+          verdictCell.text()
+        ).toLowerCase().trim();
+
+        const isAC =
+          verdictTitle.includes('correct answer') ||
+          verdictTitle.includes('accepted') ||
+          verdictTitle === 'ac';
+
+        if (isAC) {
+          solvedSet.add(problemCode);
+        } else {
+          if (!attemptedMap.has(problemCode)) {
+            attemptedMap.set(problemCode, { problemCode, name: problemName || problemCode, url: problemUrl });
           }
         }
-      }
-    });
+      });
 
-    // Deduplicate
-    const unique = [...new Set(attempted)];
-
-    const result = unique.map((pid) => ({
-      platform: 'codechef',
-      problemId: pid,
-      name: pid,
-      url: `https://www.codechef.com/problems/${pid}`,
-      difficulty: null,
-    }));
-
-    return res.status(200).json(result);
-  } catch (err) {
-    console.error('CodeChef scrape error:', err.message);
-
-    if (err.response && err.response.status === 404) {
-      return res.status(404).json({ error: `CodeChef user "${handle}" not found` });
+      // Stop if page is empty or we've exceeded max_page
+      if (rowsOnPage === 0) break;
+      const maxPage = typeof data === 'object' ? (parseInt(data.max_page, 10) || 0) : 0;
+      if (page >= maxPage - 1) break;
     }
 
+    // Return only problems that were attempted but NEVER fully solved
+    const result = [];
+    for (const [code, info] of attemptedMap) {
+      if (!solvedSet.has(code)) {
+        result.push({
+          platform: 'codechef',
+          problemId: code,
+          name: info.name,
+          url: info.url,
+          difficulty: null,
+        });
+      }
+    }
+
+    return res.status(200).json(result);
+
+  } catch (err) {
+    console.error('CodeChef error:', err.message);
+    if (err.response?.status === 404) {
+      return res.status(404).json({ error: `CodeChef user "${handle}" not found.` });
+    }
     return res.status(500).json({ error: 'Failed to fetch CodeChef data', detail: err.message });
   }
 };
