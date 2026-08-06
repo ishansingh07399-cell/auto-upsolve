@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-cf: #e8334a;
+    --color-lc: #ffa116;
+    --color-cc: #5b4638;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-zinc-950 text-zinc-100 font-sans antialiased;
+    background-image:
+      radial-gradient(ellipse at 20% 50%, rgba(88, 28, 135, 0.06) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 20%, rgba(29, 78, 216, 0.06) 0%, transparent 60%);
+    min-height: 100vh;
+  }
+
+  ::selection {
+    @apply bg-violet-600/40 text-white;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-zinc-900;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-zinc-700 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-zinc-500;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-zinc-900/60 backdrop-blur-xl border border-zinc-800/60;
+  }
+
+  .glass-dark {
+    @apply bg-zinc-950/80 backdrop-blur-xl border border-zinc-800/40;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500
+           text-white text-sm font-medium transition-all duration-200
+           active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 px-3 py-2 rounded-lg
+           text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60
+           text-sm font-medium transition-all duration-200 active:scale-95;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-md
+           text-red-400 hover:text-red-300 hover:bg-red-950/40
+           text-xs font-medium transition-all duration-200;
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2.5 rounded-lg bg-zinc-800/60 border border-zinc-700/60
+           text-zinc-100 text-sm placeholder-zinc-500
+           focus:outline-none focus:border-violet-500/60 focus:ring-1 focus:ring-violet-500/30
+           transition-all duration-200 font-mono;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .card {
+    @apply glass rounded-xl p-5 transition-all duration-200 hover:border-zinc-700/60;
+  }
+
+  /* Platform accent borders */
+  .platform-cf { @apply border-l-[3px] border-l-[var(--color-cf)]; }
+  .platform-lc { @apply border-l-[3px] border-l-[var(--color-lc)]; }
+  .platform-cc { @apply border-l-[3px] border-l-[var(--color-cc)]; }
+  .platform-upsolved { @apply border-l-[3px] border-l-emerald-500; }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-violet-400 via-fuchsia-400 to-violet-400;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+}
