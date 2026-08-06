@@ -1,7 +1,7 @@
-const axios = require('axios');
-const cheerio = require('cheerio');
+import axios from 'axios';
+import { load } from 'cheerio';
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -28,14 +28,14 @@ module.exports = async (req, res) => {
 
   try {
     // -------------------------------------------------------------------
-    // CodeChef's profile page is Cloudflare-protected.
-    // Instead, we use the internal /recent/user API which returns paginated
-    // submission history as an HTML table — no bot protection.
-    // Verdict is stored in the `title` attribute of a <span> in column 3.
+    // CodeChef's profile page is Cloudflare-protected (returns JS challenge).
+    // We use the internal /recent/user API instead — not bot-protected.
+    // It returns paginated HTML tables of submissions.
+    // Verdict is in the `title` attribute of a <span> in column 3.
     // -------------------------------------------------------------------
     const MAX_PAGES = 10;
     const solvedSet = new Set();    // problem codes that got AC
-    const attemptedMap = new Map(); // code -> { name, url } for non-AC
+    const attemptedMap = new Map(); // code -> { name, url }
 
     for (let page = 0; page < MAX_PAGES; page++) {
       const url = `https://www.codechef.com/recent/user?user_handle=${encodeURIComponent(handle)}&page=${page}`;
@@ -50,7 +50,7 @@ module.exports = async (req, res) => {
 
       const html = typeof data === 'string' ? data : (data.content || '');
 
-      // No activity at all on page 0 → treat as invalid/empty handle
+      // No activity on page 0 → user not found / no submissions
       if (page === 0 && html.includes('No Recent Activity')) {
         return res.status(404).json({
           error: `CodeChef user "${handle}" not found or has no submissions.`,
@@ -59,7 +59,7 @@ module.exports = async (req, res) => {
 
       if (!html || html.trim() === '') break;
 
-      const $ = cheerio.load(html);
+      const $ = load(html);
       let rowsOnPage = 0;
 
       $('table tbody tr').each((_, row) => {
@@ -67,15 +67,12 @@ module.exports = async (req, res) => {
         if (cells.length < 3) return;
         rowsOnPage++;
 
-        // ── Problem (column index 1) ──
-        const problemCell = $(cells[1]);
-        const link = problemCell.find('a').first();
+        // ── Problem (column 1) ──
+        const link = $(cells[1]).find('a').first();
         const href = link.attr('href') || '';
         const problemName = link.text().trim();
 
-        // Extract problem code from URL patterns:
-        //   /CONTESTCODE/problems/PROBCODE
-        //   /problems/PROBCODE
+        // Extract code from: /CONTESTCODE/problems/PROBCODE or /problems/PROBCODE
         const codeMatch =
           href.match(/\/problems\/([A-Z0-9_]+)/i) ||
           href.match(/problems\/([A-Z0-9_]+)/i);
@@ -86,8 +83,8 @@ module.exports = async (req, res) => {
           ? href
           : `https://www.codechef.com${href}`;
 
-        // ── Verdict (column index 2) ──
-        // CodeChef shows verdict as an <img> inside a <span title="...">
+        // ── Verdict (column 2) ──
+        // CodeChef stores verdict as title attr on a <span> wrapping an <img>
         const verdictCell = $(cells[2]);
         const verdictTitle = (
           verdictCell.find('span[title]').attr('title') ||
@@ -102,20 +99,20 @@ module.exports = async (req, res) => {
 
         if (isAC) {
           solvedSet.add(problemCode);
-        } else {
-          if (!attemptedMap.has(problemCode)) {
-            attemptedMap.set(problemCode, { problemCode, name: problemName || problemCode, url: problemUrl });
-          }
+        } else if (!attemptedMap.has(problemCode)) {
+          attemptedMap.set(problemCode, {
+            name: problemName || problemCode,
+            url: problemUrl,
+          });
         }
       });
 
-      // Stop if page is empty or we've exceeded max_page
       if (rowsOnPage === 0) break;
       const maxPage = typeof data === 'object' ? (parseInt(data.max_page, 10) || 0) : 0;
       if (page >= maxPage - 1) break;
     }
 
-    // Return only problems that were attempted but NEVER fully solved
+    // Return only problems attempted but NEVER fully solved
     const result = [];
     for (const [code, info] of attemptedMap) {
       if (!solvedSet.has(code)) {
@@ -138,4 +135,4 @@ module.exports = async (req, res) => {
     }
     return res.status(500).json({ error: 'Failed to fetch CodeChef data', detail: err.message });
   }
-};
+}
